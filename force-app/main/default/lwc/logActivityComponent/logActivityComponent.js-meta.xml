@@ -1,0 +1,9 @@
+<LightningComponentBundle xmlns="http://soap.sforce.com/2006/04/metadata">
+    <isExposed>true</isExposed>
+    <apiVersion>52.0</apiVersion>
+    <targets>
+        <target>lightning__Inbox</target>
+    </targets>
+    <description>A component built for logging activity from Salesforce for outlook.</description>
+    <masterLabel>LogActivityComponent</masterLabel>
+</LightningComponentBundle>

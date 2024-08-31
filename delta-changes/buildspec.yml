@@ -1,0 +1,44 @@
+version: 0.2
+
+env:
+  shell: /bin/bash
+  parameter-store:
+    USER_NAME: '{{resolve:ssm-secure:/CodeBuild/ORG_USERNAME:1}}'
+    PASSWORD: '{{resolve:ssm-secure:/CodeBuild/ORG_PASSWORD:1}}'
+  variables:
+    SERVER_URL: '{{resolve:ssm:serverurl}}'
+  git-credential-helper: yes
+
+phases:
+  install:
+    runtime-versions:
+      java: corretto17
+    commands:
+      - yum install git -y
+      - |
+        if ! [ -d "cache-dir" ]; then
+          mkdir cache-dir
+        fi      
+      - |
+        if ! [ -d "cache-dir/apache-ant-1.9.16" ]; then
+          curl -L -o cache-dir/apache-ant.tar.gz https://dlcdn.apache.org//ant/binaries/apache-ant-1.9.16-bin.tar.gz
+          tar -xzf cache-dir/apache-ant.tar.gz -C cache-dir
+        fi
+      - echo "ANT_HOME=$(pwd)/cache-dir/apache-ant-1.9.16" >> ~/.bash_profile
+      - source ~/.bash_profile 
+
+  pre_build:
+    commands:
+      - echo "sf.username = $USER_NAME" >> build.properties
+      - echo "sf.password = $PASSWORD" >> build.properties
+      - echo "sf.serverurl = $SERVER_URL" >> build.properties
+      - echo "sf.maxPoll = 20" >> build.properties     
+
+  build:
+    commands:
+      - chmod +x gdp.sh && ./gdp.sh feature/addedBuildfiles master $(pwd)
+      - ant validate -verbose
+
+cache:
+  paths:
+    - cache-dir

@@ -1,0 +1,122 @@
+name: Salesforce Delta Validation Job
+
+# Controls when the workflow will run
+on:
+  # Triggers the workflow when pull request is merged but only for the "master" branch
+  pull_request:
+    types: [opened, synchronize]
+    branches: ["master"]
+    paths:
+      - "force-app/main/default/**"
+
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
+env:
+  REPO_NAME: ${{ github.event.repository.name }}
+  SERVER_URL: ${{ github.server_url }}
+  REPOSITORY: ${{ github.repository }}
+  BRANCH: ${{ github.head_ref }}
+  PR_BODY: ${{ github.event.pull_request.body }}
+  JWT_KEY: ${{ secrets.JWT_KEY }}
+  CLIENT_KEY: ${{ secrets.CLIENT_KEY }}
+  USER_NAME: ${{ secrets.USER_NAME }}
+  JOB_TYPE: "Validation"
+
+# A workflow run is made up of one or more jobs that can run sequentially or in parallel
+jobs:
+  Code-Scan:
+    # The type of runner that the job will run on
+    runs-on: ubuntu-latest
+    environment: Production
+    # Use salesforcedx container
+    container:
+      image: salesforce/cli:latest-full
+    # Steps represent a sequence of tasks that will be executed as part of the job
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}
+
+      - name: Install delta generator and code scanner plugin
+        run: echo y | sfdx plugins:install sfdx-git-delta && sfdx plugins:install @salesforce/sfdx-scanner
+
+      - name: Generate the package consisting of delta changes
+        run: chmod +x ./bash-scripts/DetectDeltaAndCreatePackage.sh && ./bash-scripts/DetectDeltaAndCreatePackage.sh
+
+      - name: Run code scan on delta changes
+        run: |
+          chmod +x ./bash-scripts/RunCodeScan.sh && ./bash-scripts/RunCodeScan.sh
+          exit_code=$?
+          if [ "$exit_code" -eq 1 ]; then
+            echo "::error::Codescan validation failed."
+            exit 1
+          fi
+
+  Delta-Validation:
+    # The type of runner that the job will run on
+    runs-on: ubuntu-latest
+    environment: Production
+    # Use salesforcedx container
+    container:
+      image: salesforce/cli:latest-full
+    # Steps represent a sequence of tasks that will be executed as part of the job
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}
+
+      - name: Cache node modules
+        id: cache-npm
+        uses: actions/cache@v3
+        env:
+          cache-name: cache-node-modules
+        with:
+          # npm cache files are stored in `~/.npm` on Linux/macOS
+          path: ~/.npm
+          key: ${{ runner.os }}-build-${{ env.cache-name }}-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-build-${{ env.cache-name }}-
+            ${{ runner.os }}-build-
+            ${{ runner.os }}-
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Install delta generator and code scanner plugin
+        run: echo y | sf plugins:install sfdx-git-delta && sf plugins:install @salesforce/sfdx-scanner
+
+      - name: Authorize with the org and set configuration
+        run: chmod +x bash-scripts/AuthorizeAndSetConfig.sh && ./bash-scripts/AuthorizeAndSetConfig.sh
+
+      - name: Generate the package consisting of delta changes
+        run: chmod +x ./bash-scripts/DetectDeltaAndCreatePackage.sh && ./bash-scripts/DetectDeltaAndCreatePackage.sh
+
+      - name: Validate JS Syntax
+        run: |
+          chmod +x bash-scripts/RunJSSyntaxValidation.sh && ./bash-scripts/RunJSSyntaxValidation.sh
+          exit_code=$?
+          if [ "$exit_code" -eq 1 ]; then
+            echo "::error::JavaScript syntax validation failed."
+            exit 1
+          fi
+
+      - name: Validate JSON Syntax
+        run: |
+          chmod +x bash-scripts/RunJSONSyntaxValidation.sh && ./bash-scripts/RunJSONSyntaxValidation.sh
+          exit_code=$?
+          if [ "$exit_code" -eq 1 ]; then
+            echo "::error::JSON syntax validation failed."
+            exit 1
+          fi
+
+      - name: Get test classes if any from delta changes and run validation.
+        run: |
+          chmod +x bash-scripts/RunValidationAndTestClasses.sh && ./bash-scripts/RunValidationAndTestClasses.sh
+          exit_code=$?
+          if [ "$exit_code" -eq 1 ]; then
+            echo "::error::Salesforce validation failed."
+            exit 1
+          fi
